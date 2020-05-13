@@ -10,13 +10,13 @@ import struct
 import threading
 
 from test import support
+from test.support import socket_helper
 from io import BytesIO
 
 if support.PGO:
     raise unittest.SkipTest("test is not helpful for PGO")
 
 
-TIMEOUT = 3
 HAS_UNIX_SOCKETS = hasattr(socket, 'AF_UNIX')
 
 class dummysocket:
@@ -70,8 +70,8 @@ def capture_server(evt, buf, serv):
         pass
     else:
         n = 200
-        start = time.time()
-        while n > 0 and time.time() - start < 3.0:
+        start = time.monotonic()
+        while n > 0 and time.monotonic() - start < 3.0:
             r, w, e = select.select([conn], [], [], 0.1)
             if r:
                 n -= 1
@@ -92,7 +92,7 @@ def bind_af_aware(sock, addr):
     if HAS_UNIX_SOCKETS and sock.family == socket.AF_UNIX:
         # Make sure the path doesn't exist.
         support.unlink(addr)
-        support.bind_unix_socket(sock, addr)
+        socket_helper.bind_unix_socket(sock, addr)
     else:
         sock.bind(addr)
 
@@ -328,7 +328,7 @@ class DispatcherWithSendTests(unittest.TestCase):
         evt = threading.Event()
         sock = socket.socket()
         sock.settimeout(3)
-        port = support.bind_port(sock)
+        port = socket_helper.bind_port(sock)
 
         cap = BytesIO()
         args = (evt, cap, sock)
@@ -342,7 +342,7 @@ class DispatcherWithSendTests(unittest.TestCase):
             data = b"Suppose there isn't a 16-ton weight?"
             d = dispatcherwithsend_noread()
             d.create_socket()
-            d.connect((support.HOST, port))
+            d.connect((socket_helper.HOST, port))
 
             # give time for socket to connect
             time.sleep(0.1)
@@ -360,7 +360,7 @@ class DispatcherWithSendTests(unittest.TestCase):
 
             self.assertEqual(cap.getvalue(), data*2)
         finally:
-            support.join_thread(t, timeout=TIMEOUT)
+            support.join_thread(t)
 
 
 @unittest.skipUnless(hasattr(asyncore, 'file_wrapper'),
@@ -726,14 +726,10 @@ class BaseTestAPI:
     def test_create_socket(self):
         s = asyncore.dispatcher()
         s.create_socket(self.family)
+        self.assertEqual(s.socket.type, socket.SOCK_STREAM)
         self.assertEqual(s.socket.family, self.family)
-        SOCK_NONBLOCK = getattr(socket, 'SOCK_NONBLOCK', 0)
-        sock_type = socket.SOCK_STREAM | SOCK_NONBLOCK
-        if hasattr(socket, 'SOCK_CLOEXEC'):
-            self.assertIn(s.socket.type,
-                          (sock_type | socket.SOCK_CLOEXEC, sock_type))
-        else:
-            self.assertEqual(s.socket.type, sock_type)
+        self.assertEqual(s.socket.gettimeout(), 0)
+        self.assertFalse(s.socket.get_inheritable())
 
     def test_bind(self):
         if HAS_UNIX_SOCKETS and self.family == socket.AF_UNIX:
@@ -792,16 +788,16 @@ class BaseTestAPI:
                 except OSError:
                     pass
         finally:
-            support.join_thread(t, timeout=TIMEOUT)
+            support.join_thread(t)
 
 class TestAPI_UseIPv4Sockets(BaseTestAPI):
     family = socket.AF_INET
-    addr = (support.HOST, 0)
+    addr = (socket_helper.HOST, 0)
 
-@unittest.skipUnless(support.IPV6_ENABLED, 'IPv6 support required')
+@unittest.skipUnless(socket_helper.IPV6_ENABLED, 'IPv6 support required')
 class TestAPI_UseIPv6Sockets(BaseTestAPI):
     family = socket.AF_INET6
-    addr = (support.HOSTv6, 0)
+    addr = (socket_helper.HOSTv6, 0)
 
 @unittest.skipUnless(HAS_UNIX_SOCKETS, 'Unix sockets required')
 class TestAPI_UseUnixSockets(BaseTestAPI):
