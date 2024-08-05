@@ -4,16 +4,13 @@ import unittest
 from textwrap import dedent
 from contextlib import ExitStack
 from unittest import mock
-from test import support
-
-code = support.import_module('code')
+from test.support import import_helper
 
 
-class TestInteractiveConsole(unittest.TestCase):
+code = import_helper.import_module('code')
 
-    def setUp(self):
-        self.console = code.InteractiveConsole()
-        self.mock_sys()
+
+class MockSys:
 
     def mock_sys(self):
         "Mock system environment for InteractiveConsole"
@@ -30,6 +27,13 @@ class TestInteractiveConsole(unittest.TestCase):
             self.sysmod.excepthook = self.sysmod.__excepthook__
         del self.sysmod.ps1
         del self.sysmod.ps2
+
+
+class TestInteractiveConsole(unittest.TestCase, MockSys):
+
+    def setUp(self):
+        self.console = code.InteractiveConsole()
+        self.mock_sys()
 
     def test_ps1(self):
         self.infunc.side_effect = EOFError('Finished')
@@ -72,6 +76,39 @@ class TestInteractiveConsole(unittest.TestCase):
         self.sysmod.excepthook = hook
         self.console.interact()
         self.assertTrue(hook.called)
+
+    def test_sysexcepthook_crashing_doesnt_close_repl(self):
+        self.infunc.side_effect = ["1/0", "a = 123", "print(a)", EOFError('Finished')]
+        self.sysmod.excepthook = 1
+        self.console.interact()
+        self.assertEqual(['write', ('123', ), {}], self.stdout.method_calls[0])
+        error = "".join(call.args[0] for call in self.stderr.method_calls if call[0] == 'write')
+        self.assertIn("Error in sys.excepthook:", error)
+        self.assertEqual(error.count("'int' object is not callable"), 1)
+        self.assertIn("Original exception was:", error)
+        self.assertIn("division by zero", error)
+
+    def test_sysexcepthook_raising_BaseException(self):
+        self.infunc.side_effect = ["1/0", "a = 123", "print(a)", EOFError('Finished')]
+        s = "not so fast"
+        def raise_base(*args, **kwargs):
+            raise BaseException(s)
+        self.sysmod.excepthook = raise_base
+        self.console.interact()
+        self.assertEqual(['write', ('123', ), {}], self.stdout.method_calls[0])
+        error = "".join(call.args[0] for call in self.stderr.method_calls if call[0] == 'write')
+        self.assertIn("Error in sys.excepthook:", error)
+        self.assertEqual(error.count("not so fast"), 1)
+        self.assertIn("Original exception was:", error)
+        self.assertIn("division by zero", error)
+
+    def test_sysexcepthook_raising_SystemExit_gets_through(self):
+        self.infunc.side_effect = ["1/0"]
+        def raise_base(*args, **kwargs):
+            raise SystemExit
+        self.sysmod.excepthook = raise_base
+        with self.assertRaises(SystemExit):
+            self.console.interact()
 
     def test_banner(self):
         # with banner
@@ -148,6 +185,23 @@ class TestInteractiveConsole(unittest.TestCase):
         NameError: name 'eggs' is not defined
         """)
         self.assertIn(expected, output)
+
+
+class TestInteractiveConsoleLocalExit(unittest.TestCase, MockSys):
+
+    def setUp(self):
+        self.console = code.InteractiveConsole(local_exit=True)
+        self.mock_sys()
+
+    @unittest.skipIf(sys.flags.no_site, "exit() isn't defined unless there's a site module")
+    def test_exit(self):
+        # default exit message
+        self.infunc.side_effect = ["exit()"]
+        self.console.interact(banner='')
+        self.assertEqual(len(self.stderr.method_calls), 2)
+        err_msg = self.stderr.method_calls[1]
+        expected = 'now exiting InteractiveConsole...\n'
+        self.assertEqual(err_msg, ['write', (expected,), {}])
 
 
 if __name__ == "__main__":

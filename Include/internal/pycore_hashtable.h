@@ -18,9 +18,9 @@ typedef struct {
     _Py_slist_item_t *head;
 } _Py_slist_t;
 
-#define _Py_SLIST_ITEM_NEXT(ITEM) (((_Py_slist_item_t *)ITEM)->next)
+#define _Py_SLIST_ITEM_NEXT(ITEM) _Py_RVALUE(((_Py_slist_item_t *)(ITEM))->next)
 
-#define _Py_SLIST_HEAD(SLIST) (((_Py_slist_t *)SLIST)->head)
+#define _Py_SLIST_HEAD(SLIST) _Py_RVALUE(((_Py_slist_t *)(SLIST))->head)
 
 
 /* _Py_hashtable: table entry */
@@ -48,18 +48,18 @@ typedef _Py_hashtable_entry_t* (*_Py_hashtable_get_entry_func)(_Py_hashtable_t *
                                                                const void *key);
 
 typedef struct {
-    /* allocate a memory block */
+    // Allocate a memory block
     void* (*malloc) (size_t size);
 
-    /* release a memory block */
+    // Release a memory block
     void (*free) (void *ptr);
 } _Py_hashtable_allocator_t;
 
 
 /* _Py_hashtable: table */
 struct _Py_hashtable_t {
-    size_t num_buckets;
-    size_t entries; /* Total number of entries in the table. */
+    size_t nentries; // Total number of entries in the table
+    size_t nbuckets;
     _Py_slist_t *buckets;
 
     _Py_hashtable_get_entry_func get_entry_func;
@@ -70,17 +70,18 @@ struct _Py_hashtable_t {
     _Py_hashtable_allocator_t alloc;
 };
 
-/* hash a pointer (void*) */
-PyAPI_FUNC(Py_uhash_t) _Py_hashtable_hash_ptr(const void *key);
-
-/* comparison using memcmp() */
-PyAPI_FUNC(int) _Py_hashtable_compare_direct(
-    const void *key1,
-    const void *key2);
-
+// Export _Py_hashtable functions for '_testinternalcapi' shared extension
 PyAPI_FUNC(_Py_hashtable_t *) _Py_hashtable_new(
     _Py_hashtable_hash_func hash_func,
     _Py_hashtable_compare_func compare_func);
+
+/* Hash a pointer (void*) */
+PyAPI_FUNC(Py_uhash_t) _Py_hashtable_hash_ptr(const void *key);
+
+/* Comparison using memcmp() */
+PyAPI_FUNC(int) _Py_hashtable_compare_direct(
+    const void *key1,
+    const void *key2);
 
 PyAPI_FUNC(_Py_hashtable_t *) _Py_hashtable_new_full(
     _Py_hashtable_hash_func hash_func,
@@ -106,6 +107,7 @@ PyAPI_FUNC(int) _Py_hashtable_foreach(
     void *user_data);
 
 PyAPI_FUNC(size_t) _Py_hashtable_size(const _Py_hashtable_t *ht);
+PyAPI_FUNC(size_t) _Py_hashtable_len(const _Py_hashtable_t *ht);
 
 /* Add a new entry to the hash. The key must not be present in the hash table.
    Return 0 on success, -1 on memory error. */
@@ -129,13 +131,14 @@ _Py_hashtable_get_entry(_Py_hashtable_t *ht, const void *key)
 
    Use _Py_hashtable_get_entry() to distinguish entry value equal to NULL
    and entry not found. */
-extern void *_Py_hashtable_get(_Py_hashtable_t *ht, const void *key);
+PyAPI_FUNC(void*) _Py_hashtable_get(_Py_hashtable_t *ht, const void *key);
 
 
-// Remove a key and its associated value without calling key and value destroy
-// functions.
-// Return the removed value if the key was found.
-// Return NULL if the key was not found.
+/* Remove a key and its associated value without calling key and value destroy
+   functions.
+
+   Return the removed value if the key was found.
+   Return NULL if the key was not found. */
 PyAPI_FUNC(void*) _Py_hashtable_steal(
     _Py_hashtable_t *ht,
     const void *key);
